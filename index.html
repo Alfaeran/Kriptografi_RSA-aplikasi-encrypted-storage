@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aplikasi Studi Kasus Kriptografi</title>
+  <style>
+    :root { font-family: Arial, sans-serif; color-scheme: light; }
+    body { margin: 0; background: #f6f7fb; color: #1f2937; }
+    main { max-width: 900px; margin: 24px auto; padding: 0 16px; }
+    .card { background: #fff; border: 1px solid #dbe1ea; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    h1, h2 { margin-top: 0; }
+    label { display: block; font-weight: 600; margin-top: 10px; }
+    input, textarea, button { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 10px; border: 1px solid #c8d0dd; border-radius: 8px; font-size: 14px; }
+    textarea { min-height: 88px; resize: vertical; }
+    button { cursor: pointer; background: #1d4ed8; color: #fff; border: 0; font-weight: 700; }
+    button.secondary { background: #475569; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .result { background: #f8fafc; border: 1px dashed #94a3b8; padding: 10px; border-radius: 8px; white-space: pre-wrap; word-break: break-word; margin-top: 10px; }
+    .inline { display: flex; gap: 8px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Program Kriptografi dengan UI</h1>
+
+    <section class="card">
+      <h2>Data Kelompok (3 Orang)</h2>
+      <div class="grid">
+        <div>
+          <label for="member1">Anggota 1</label>
+          <input id="member1" placeholder="Nama anggota 1" />
+        </div>
+        <div>
+          <label for="member2">Anggota 2</label>
+          <input id="member2" placeholder="Nama anggota 2" />
+        </div>
+        <div>
+          <label for="member3">Anggota 3</label>
+          <input id="member3" placeholder="Nama anggota 3" />
+        </div>
+      </div>
+      <button id="validateGroup">Validasi Jumlah Anggota</button>
+      <div id="groupResult" class="result"></div>
+    </section>
+
+    <section class="card">
+      <h2>Studi Kasus 1: Caesar Cipher</h2>
+      <label for="caesarPlain">Teks</label>
+      <textarea id="caesarPlain" placeholder="Masukkan teks"></textarea>
+      <label for="caesarShift">Shift</label>
+      <input id="caesarShift" type="number" value="3" />
+      <div class="inline">
+        <button id="caesarEncrypt">Enkripsi</button>
+        <button id="caesarDecrypt" class="secondary">Dekripsi</button>
+      </div>
+      <div id="caesarResult" class="result"></div>
+    </section>
+
+    <section class="card">
+      <h2>Studi Kasus 2: Implementasi RSA</h2>
+      <p>RSA menggunakan pasangan kunci publik (e, n) dan privat (d, n).</p>
+      <div class="inline">
+        <button id="generateRsa">Generate Kunci RSA</button>
+      </div>
+      <div id="rsaKeys" class="result"></div>
+
+      <label for="rsaPlain">Plaintext</label>
+      <textarea id="rsaPlain" placeholder="Teks untuk dienkripsi"></textarea>
+      <button id="rsaEncrypt">Enkripsi RSA</button>
+      <div id="rsaCipher" class="result"></div>
+
+      <label for="rsaCipherInput">Ciphertext (angka dipisah koma)</label>
+      <textarea id="rsaCipherInput" placeholder="contoh: 12345,67890"></textarea>
+      <button id="rsaDecrypt" class="secondary">Dekripsi RSA</button>
+      <div id="rsaPlainResult" class="result"></div>
+    </section>
+  </main>
+
+  <script>
+    function caesarTransform(text, shift) {
+      return [...text].map((ch) => {
+        const base = ch >= 'a' && ch <= 'z' ? 'a'.charCodeAt(0) : ch >= 'A' && ch <= 'Z' ? 'A'.charCodeAt(0) : null;
+        if (base === null) return ch;
+        const normalized = ch.charCodeAt(0) - base;
+        const moved = (normalized + shift + 26 * 1000) % 26;
+        return String.fromCharCode(base + moved);
+      }).join('');
+    }
+
+    function gcd(a, b) {
+      while (b !== 0n) {
+        [a, b] = [b, a % b];
+      }
+      return a;
+    }
+
+    function modPow(base, exponent, mod) {
+      let result = 1n;
+      base = base % mod;
+      while (exponent > 0n) {
+        if (exponent % 2n === 1n) result = (result * base) % mod;
+        exponent /= 2n;
+        base = (base * base) % mod;
+      }
+      return result;
+    }
+
+    function modInverse(a, m) {
+      let [oldR, r] = [a, m];
+      let [oldS, s] = [1n, 0n];
+      while (r !== 0n) {
+        const q = oldR / r;
+        [oldR, r] = [r, oldR - q * r];
+        [oldS, s] = [s, oldS - q * s];
+      }
+      if (oldR !== 1n) throw new Error('Invers modulo tidak ditemukan');
+      return (oldS % m + m) % m;
+    }
+
+    function generateRsaKeyPair() {
+      const primes = [
+        1019n, 1237n, 1427n, 1453n, 1481n, 1489n, 1511n, 1601n, 1613n, 1657n, 1699n,
+      ];
+      const pick = () => primes[Math.floor(Math.random() * primes.length)];
+      let p = pick();
+      let q = pick();
+      while (q === p) q = pick();
+
+      const n = p * q;
+      const phi = (p - 1n) * (q - 1n);
+      let e = 65537n;
+      if (gcd(e, phi) !== 1n) {
+        e = 3n;
+        while (gcd(e, phi) !== 1n) e += 2n;
+      }
+      const d = modInverse(e, phi);
+      return { publicKey: { e, n }, privateKey: { d, n } };
+    }
+
+    function rsaEncrypt(text, publicKey) {
+      return [...text].map((char) => modPow(BigInt(char.charCodeAt(0)), publicKey.e, publicKey.n).toString());
+    }
+
+    function rsaDecrypt(cipherArray, privateKey) {
+      return cipherArray
+        .filter((v) => v !== '')
+        .map((part) => {
+          const code = modPow(BigInt(part.trim()), privateKey.d, privateKey.n);
+          return String.fromCharCode(Number(code));
+        })
+        .join('');
+    }
+
+    document.getElementById('validateGroup').addEventListener('click', () => {
+      const members = ['member1', 'member2', 'member3'].map((id) => document.getElementById(id).value.trim()).filter(Boolean);
+      document.getElementById('groupResult').textContent = members.length === 3
+        ? `Valid: 3 anggota terisi -> ${members.join(', ')}`
+        : 'Harus tepat 3 anggota yang terisi.';
+    });
+
+    document.getElementById('caesarEncrypt').addEventListener('click', () => {
+      const text = document.getElementById('caesarPlain').value;
+      const shift = Number(document.getElementById('caesarShift').value) || 0;
+      document.getElementById('caesarResult').textContent = caesarTransform(text, shift);
+    });
+
+    document.getElementById('caesarDecrypt').addEventListener('click', () => {
+      const text = document.getElementById('caesarPlain').value;
+      const shift = Number(document.getElementById('caesarShift').value) || 0;
+      document.getElementById('caesarResult').textContent = caesarTransform(text, -shift);
+    });
+
+    let currentKeys = null;
+
+    document.getElementById('generateRsa').addEventListener('click', () => {
+      currentKeys = generateRsaKeyPair();
+      document.getElementById('rsaKeys').textContent =
+        `Public Key (e,n): (${currentKeys.publicKey.e}, ${currentKeys.publicKey.n})\n` +
+        `Private Key (d,n): (${currentKeys.privateKey.d}, ${currentKeys.privateKey.n})`;
+    });
+
+    document.getElementById('rsaEncrypt').addEventListener('click', () => {
+      if (!currentKeys) {
+        document.getElementById('rsaCipher').textContent = 'Generate kunci RSA terlebih dahulu.';
+        return;
+      }
+      const plaintext = document.getElementById('rsaPlain').value;
+      const encrypted = rsaEncrypt(plaintext, currentKeys.publicKey);
+      document.getElementById('rsaCipher').textContent = encrypted.join(',');
+      document.getElementById('rsaCipherInput').value = encrypted.join(',');
+    });
+
+    document.getElementById('rsaDecrypt').addEventListener('click', () => {
+      if (!currentKeys) {
+        document.getElementById('rsaPlainResult').textContent = 'Generate kunci RSA terlebih dahulu.';
+        return;
+      }
+      try {
+        const ciphertext = document.getElementById('rsaCipherInput').value.split(',').map((v) => v.trim()).filter(Boolean);
+        const decrypted = rsaDecrypt(ciphertext, currentKeys.privateKey);
+        document.getElementById('rsaPlainResult').textContent = decrypted;
+      } catch {
+        document.getElementById('rsaPlainResult').textContent = 'Ciphertext tidak valid.';
+      }
+    });
+  </script>
+</body>
+</html>
