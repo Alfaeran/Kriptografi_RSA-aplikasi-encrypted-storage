@@ -16,7 +16,8 @@ import rsa
 import storage
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VAULT = os.path.join(HERE, "vault.json")
+# VAULT_FILE lets tests point at a throwaway vault instead of the real one
+VAULT = os.environ.get("VAULT_FILE") or os.path.join(HERE, "vault.json")
 MAX_BODY = 8 * 1024 * 1024          # 8 MiB request cap
 KEY_SIZES = (256, 512, 1024, 2048)  # offered bit lengths
 HEX_RE = re.compile(r"\A[0-9a-fA-F]+(:[0-9a-fA-F]+)*\Z")
@@ -129,20 +130,18 @@ class Handler(BaseHTTPRequestHandler):
     def encrypt(self, req):
         n = big_int(req.get("n"), "Modulus n")
         e = big_int(req.get("e"), "Eksponen publik e")
-        label = (req.get("label") or "").strip()[:80] or "tanpa nama"
-        kind = "file" if req.get("filename") else "text"
+        filename = (req.get("filename") or "").strip()[:120]
+        if not filename:
+            raise ValueError("Nama berkas wajib diisi - hanya berkas yang dapat dienkripsi.")
+        label = (req.get("label") or "").strip()[:80] or filename
 
-        if kind == "file":
-            try:
-                data = base64.b64decode(req.get("data") or "", validate=True)
-            except Exception:
-                raise ValueError("Berkas tidak dapat dibaca (base64 rusak).")
-        else:
-            text = req.get("data") or ""
-            if not text.strip():
-                raise ValueError("Tidak ada teks untuk dienkripsi.")
-            data = text.encode("utf-8")
+        try:
+            data = base64.b64decode(req.get("data") or "", validate=True)
+        except Exception:
+            raise ValueError("Berkas tidak dapat dibaca (base64 rusak).")
 
+        if not data:
+            raise ValueError("Berkas kosong - tidak ada yang dapat dienkripsi.")
         if len(data) > MAX_BODY:
             raise ValueError("Data terlalu besar (maksimum 8 MB).")
 
@@ -152,8 +151,8 @@ class Handler(BaseHTTPRequestHandler):
         entry = {
             "id": uuid.uuid4().hex[:12],
             "label": label,
-            "kind": kind,
-            "filename": (req.get("filename") or "")[:120] or None,
+            "kind": "file",
+            "filename": filename,
             "bytes": len(data),
             "blocks": ciphertext.count(":") + 1 if ciphertext else 0,
             "n_tail": str(n)[-8:],

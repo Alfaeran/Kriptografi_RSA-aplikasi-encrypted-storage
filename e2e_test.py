@@ -10,13 +10,21 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VAULT = os.path.join(HERE, "vault.json")
 BACKUP = VAULT + ".e2e-backup"
-SECRET = "Rahasia ujian kriptografi 2026 - unicode cek dan teks yang cukup panjang " * 3
+
+# Fixtures: binary payload (all 256 byte values, so null bytes and high bytes
+# are covered), an empty file, and one just over the 8 MB cap.
+TMP = tempfile.mkdtemp(prefix="rsavault-e2e-")
+PAYLOAD = bytes(range(256)) * 12 + "Rahasia ujian kriptografi 2026".encode("utf-8")
+FIXTURE = os.path.join(TMP, "rahasia.bin")
+EMPTY_FILE = os.path.join(TMP, "kosong.bin")
+BIG_FILE = os.path.join(TMP, "besar.bin")
 
 checks, failures = [], []
 
@@ -37,6 +45,11 @@ def main():
         from playwright.sync_api import sync_playwright
     except ImportError:
         sys.exit("playwright tidak terpasang: pip install playwright && playwright install chromium")
+
+    for path, blob in ((FIXTURE, PAYLOAD), (EMPTY_FILE, b""),
+                       (BIG_FILE, b"\x00" * (8 * 1048576 + 1024))):
+        with open(path, "wb") as f:
+            f.write(blob)
 
     if os.path.exists(VAULT):
         shutil.copy2(VAULT, BACKUP)
@@ -60,7 +73,8 @@ def main():
 
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
-            page = browser.new_page(viewport={"width": 1440, "height": 950})
+            page = browser.new_page(viewport={"width": 1440, "height": 950},
+                                    accept_downloads=True)
             errors = []
             page.on("pageerror", lambda e: errors.append("pageerror: " + str(e)))
             # The suite deliberately provokes HTTP 400s (wrong key, empty input);
@@ -79,7 +93,14 @@ def main():
             # [hidden] must actually hide: display:grid rules once beat the UA rule
             check("panel kunci tersembunyi sebelum keygen", page.locator("#kg-keys").is_hidden())
             check("parameter tersembunyi sebelum keygen", page.locator("#kg-params").is_hidden())
-            check("input berkas tersembunyi di mode teks", page.locator("#w-file").is_hidden())
+
+            # --- plain-text input is gone; only the file drop zone remains ---
+            check("textarea plainteks sudah dihapus", page.locator("#plain").count() == 0)
+            check("tab Teks/Berkas sudah dihapus",
+                  page.locator("#tab-text, #tab-file").count() == 0)
+            check("drop zone berkas terlihat", page.locator("#drop").is_visible())
+            check("drop zone memberi petunjuk jelas",
+                  "berkas" in page.inner_text("#drop").lower())
 
             # --- 01 keygen --------------------------------------------------
             page.select_option("#bits", "512")
@@ -101,9 +122,33 @@ def main():
             check("p x q == n (terlihat di UI)", vals["p"] * vals["q"] == vals["n"])
             check("e x d == 1 mod phi(n)", vals["e"] * vals["d"] % vals["phi(n)"] == 1)
 
-            # --- 02 encrypt -------------------------------------------------
-            page.fill("#label", "catatan ujian")
-            page.fill("#plain", SECRET)
+            # --- 02 encrypt: empty selection rejected before any upload -----
+            page.click("#enc")
+            page.wait_for_selector("#enc-out .err", timeout=10_000)
+            check("tanpa berkas ditolak", "Pilih berkas" in page.inner_text("#enc-out .err"))
+
+            # --- empty file rejected (zero bytes is not encryptable) --------
+            page.set_input_files("#file", EMPTY_FILE)
+            page.click("#enc")
+            page.wait_for_selector("#enc-out .err", timeout=10_000)
+            check("berkas kosong ditolak", "kosong" in page.inner_text("#enc-out .err").lower(),
+                  page.inner_text("#enc-out .err"))
+
+            # --- UX: selecting a file surfaces its name, size and a label ---
+            page.fill("#label", "")
+            page.set_input_files("#file", FIXTURE)
+            page.wait_for_timeout(200)
+            check("nama berkas ditampilkan setelah dipilih",
+                  os.path.basename(FIXTURE) in page.inner_text("#drop-name"))
+            check("ukuran berkas ditampilkan", "KB" in page.inner_text("#drop-size")
+                  or "B" in page.inner_text("#drop-size"))
+            check("drop zone menandai status terisi",
+                  "set" in (page.get_attribute("#drop", "class") or ""))
+            check("label terisi otomatis dari nama berkas",
+                  page.input_value("#label") == "rahasia",
+                  page.input_value("#label"))
+            check("tombol ganti berkas muncul", page.locator("#drop-clear").is_visible())
+
             page.click("#enc")
             page.wait_for_selector("#enc-out .out", timeout=30_000)
             tape = page.inner_text("#enc-out .formula")
@@ -113,15 +158,40 @@ def main():
             check("entri terpilih otomatis",
                   page.locator('#vault .entry[aria-current="true"]').count() == 1)
             check("tombol dekripsi aktif", page.is_enabled("#dec"))
-            check("plainteks dibersihkan dari form", page.input_value("#plain") == "")
+            check("drop zone kembali kosong setelah enkripsi",
+                  page.locator("#drop-has").is_hidden() and page.input_value("#label") == "")
 
-            # --- tab switching actually swaps the visible input --------------
-            page.click("#tab-file")
-            check("mode berkas menampilkan input berkas", page.locator("#w-file").is_visible())
-            check("mode berkas menyembunyikan textarea", page.locator("#w-text").is_hidden())
-            page.click("#tab-text")
-            check("kembali ke mode teks", page.locator("#w-text").is_visible()
-                  and page.locator("#w-file").is_hidden())
+            # --- UX: drop zone reachable and operable by keyboard -----------
+            page.evaluate("() => document.getElementById('drop').focus()")
+            check("drop zone dapat difokuskan dengan keyboard",
+                  page.evaluate("() => document.activeElement.id") == "drop")
+            check("drop zone punya label aksesibilitas",
+                  bool(page.get_attribute("#drop", "aria-label")))
+            # the native input is visually collapsed behind the drop zone;
+            # Chromium still reports its shadow button as a 22x18 box, so
+            # measure the clip rect rather than asking is_hidden()
+            check("input berkas asli disembunyikan dari tampilan",
+                  page.evaluate("""() => {
+                      const r = document.getElementById('file').getBoundingClientRect();
+                      return r.width <= 24 && r.height <= 24;
+                  }"""))
+
+            # --- UX: oversized file rejected with the size named ------------
+            page.set_input_files("#file", BIG_FILE)
+            page.click("#enc")
+            page.wait_for_selector("#enc-out .err", timeout=20_000)
+            msg = page.inner_text("#enc-out .err")
+            check("berkas > 8 MB ditolak dengan menyebut ukuran",
+                  "8 MB" in msg and "MB" in msg, msg)
+            page.evaluate("() => { document.getElementById('file').value=''; }")
+            page.set_input_files("#file", [])
+            page.wait_for_timeout(150)
+
+            # re-select the real fixture and encrypt again for the decrypt leg
+            page.set_input_files("#file", FIXTURE)
+            page.fill("#label", "catatan ujian")
+            page.click("#enc")
+            page.wait_for_selector("#enc-out .out", timeout=30_000)
 
             # --- wrong key must be rejected, not silently wrong -------------
             page.fill("#d-d", "3")
@@ -139,19 +209,22 @@ def main():
                   "bit" in page.inner_text("#dec-out .err").lower(),
                   page.inner_text("#dec-out .err"))
 
-            # --- 03 decrypt with the real key -------------------------------
+            # --- 03 decrypt with the real key, then verify the bytes --------
             page.click('[data-use="dec"]')
-            page.click("#dec")
-            page.wait_for_selector("#dec-out .out", timeout=30_000)
-            got = page.inner_text("#dec-out pre")
-            check("plainteks pulih persis sama", got == SECRET,
-                  f"len {len(got)} vs {len(SECRET)}")
-
-            # --- empty input validated --------------------------------------
-            page.fill("#plain", "   ")
-            page.click("#enc")
-            page.wait_for_selector("#enc-out .err", timeout=10_000)
-            check("teks kosong ditolak", "Tidak ada teks" in page.inner_text("#enc-out .err"))
+            with page.expect_download() as dl_info:
+                page.click("#dec")
+                page.wait_for_selector("#dec-out .out", timeout=30_000)
+                page.click("#dec-out a button")
+            dl = dl_info.value
+            out_path = os.path.join(HERE, "_e2e_download.tmp")
+            dl.save_as(out_path)
+            with open(out_path, "rb") as f:
+                got = f.read()
+            os.remove(out_path)
+            check("berkas terunduh memakai nama aslinya",
+                  dl.suggested_filename == os.path.basename(FIXTURE), dl.suggested_filename)
+            check("isi berkas pulih byte-per-byte", got == PAYLOAD,
+                  f"{len(got)} byte vs {len(PAYLOAD)} byte")
 
             # --- responsive: no horizontal overflow on a phone --------------
             for w, h, name in ((1440, 950, "desktop"), (390, 844, "ponsel")):
@@ -162,12 +235,23 @@ def main():
             page.set_viewport_size({"width": 1440, "height": 950})
 
             # --- cleanup through the UI (also tests delete) ------------------
+            before = page.locator("#vault .entry").count()
             page.locator("#vault .entry").first.click()
             page.once("dialog", lambda d: d.accept())
             page.click("#del")
             page.wait_for_timeout(600)
-            check("entri terhapus lewat UI", page.locator("#vault .entry").count() == 0
-                  or page.locator("#vault .empty").count() == 1)
+            check("satu entri terhapus lewat UI",
+                  page.locator("#vault .entry").count() == before - 1,
+                  f"{before} -> {page.locator('#vault .entry').count()}")
+
+            # drain the rest so the vault is left as it was found
+            while page.locator("#vault .entry").count():
+                page.locator("#vault .entry").first.click()
+                page.once("dialog", lambda d: d.accept())
+                page.click("#del")
+                page.wait_for_timeout(400)
+            check("vault kembali kosong setelah dibersihkan",
+                  page.locator("#vault .empty").count() == 1)
 
             check("tanpa error JavaScript", not errors, "; ".join(errors[:3]))
 
@@ -184,6 +268,7 @@ def main():
             os.replace(BACKUP, VAULT)
         elif os.path.exists(VAULT) and json.load(open(VAULT, encoding="utf-8")) == []:
             os.remove(VAULT)
+        shutil.rmtree(TMP, ignore_errors=True)
 
     print(f"\n{len(checks)} lulus, {len(failures)} gagal")
     if failures:

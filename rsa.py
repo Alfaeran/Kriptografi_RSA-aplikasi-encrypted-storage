@@ -45,7 +45,13 @@ def generate_prime(nbits):
         candidate = int.from_bytes(os.urandom(nbytes), "big")
         candidate &= (1 << nbits) - 1
         candidate |= 1 << (nbits - 1)
-        candidate |= 1 
+        # Force the second-highest bit too, so p >= 1.5 * 2^(nbits-1). Two such
+        # primes multiply to at least 2.25 * 2^(2*nbits-2) > 2^(2*nbits-1),
+        # which guarantees n is exactly 2*nbits long. With only the top bit set
+        # the product falls one bit short roughly half the time.
+        if nbits >= 2:
+            candidate |= 1 << (nbits - 2)
+        candidate |= 1
 
         if is_prime(candidate):
             return candidate

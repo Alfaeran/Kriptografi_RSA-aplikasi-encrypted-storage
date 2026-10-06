@@ -70,10 +70,28 @@ section{
 .head h2{font-size:12px;font-weight:600;letter-spacing:.11em;text-transform:uppercase}
 .head .note{font-family:var(--mono);font-size:10.5px;color:var(--fg-faint);margin-left:auto}
 .body{padding:14px;display:grid;gap:12px;min-width:0}
+/* grid children default to min-width:auto — a nowrap child would otherwise
+   stretch the whole panel instead of scrolling inside its own box */
+.body>*,.split>*{min-width:0}
 
 /* ── controls ───────────────────────────────────────────────────────── */
-label.f{display:grid;gap:5px;min-width:0}
-label.f>span{font-family:var(--mono);font-size:10px;letter-spacing:.11em;color:var(--fg-dim);text-transform:uppercase}
+label.f,div.f{display:grid;gap:5px;min-width:0}
+label.f>span,div.f>.lab{font-family:var(--mono);font-size:10px;letter-spacing:.11em;color:var(--fg-dim);text-transform:uppercase}
+
+/* file drop zone — the primary control of panel 02 */
+.drop{
+  display:grid;place-items:center;gap:4px;text-align:center;
+  padding:22px 14px;border:1px dashed var(--rule);border-radius:2px;
+  background:var(--ink);cursor:pointer;min-height:92px;
+  font-family:var(--mono);font-size:11.5px;color:var(--fg-dim);
+  transition:border-color .12s,background .12s,color .12s;
+}
+.drop:hover,.drop:focus-visible{border-color:var(--pub);color:var(--fg);outline:none}
+.drop.over{border-color:var(--pub);border-style:solid;background:rgba(63,208,214,.07);color:var(--fg)}
+.drop.set{border-style:solid;border-color:var(--pub);background:rgba(63,208,214,.05)}
+.drop u{color:var(--pub);text-underline-offset:2px}
+.drop b{display:block;font-size:12.5px;font-weight:500;color:var(--fg);word-break:break-all}
+.drop small{display:block;margin-top:3px;font-size:10.5px;color:var(--fg-faint)}
 input,textarea,select{
   width:100%;background:var(--ink);color:var(--fg);border:1px solid var(--rule);
   border-radius:2px;padding:8px 10px;font:12px/1.5 var(--mono);
@@ -230,18 +248,19 @@ button.ghost{padding:6px 9px;font-size:10.5px;color:var(--fg-dim)}
     <section>
       <div class="head"><div class="step">02</div><h2>Enkripsi &amp; Simpan</h2></div>
       <div class="body">
-        <label class="f"><span>Label entri</span>
-          <input id="label" placeholder="mis. catatan ujian" maxlength="80"></label>
+        <label class="f"><span>Label entri (opsional)</span>
+          <input id="label" placeholder="otomatis dari nama berkas" maxlength="80"></label>
 
-        <div class="seg" role="group" aria-label="Jenis masukan">
-          <button id="tab-text" aria-pressed="true">Teks</button>
-          <button id="tab-file" aria-pressed="false">Berkas</button>
+        <div class="f"><span class="lab">Berkas (maks 8 MB)</span>
+          <input type="file" id="file" class="sr">
+          <label class="drop" id="drop" for="file" tabindex="0">
+            <span id="drop-idle">Letakkan berkas di sini atau <u>pilih berkas</u></span>
+            <span id="drop-has" hidden><b id="drop-name"></b><small id="drop-size"></small></span>
+          </label>
+          <div class="row" id="drop-clear-row" hidden>
+            <button class="ghost" id="drop-clear" type="button">Ganti berkas</button>
+          </div>
         </div>
-
-        <label class="f" id="w-text"><span>Plainteks</span>
-          <textarea id="plain" placeholder="Tulis data sensitif di sini…"></textarea></label>
-        <label class="f" id="w-file" hidden><span>Berkas (maks 8 MB)</span>
-          <input type="file" id="file"></label>
 
         <div class="split" style="gap:10px">
           <label class="f"><span>Modulus n</span><input id="e-n" inputmode="numeric" placeholder="paste dari Key Bench"></label>
@@ -282,7 +301,7 @@ button.ghost{padding:6px 9px;font-size:10.5px;color:var(--fg-dim)}
 
 <script>
 const $ = s => document.querySelector(s);
-const state = { key:null, mode:'text', selected:null, entries:[] };
+const state = { key:null, selected:null, entries:[] };
 
 /* ── toasts ───────────────────────────────────────────────────────── */
 const ICON = {ok:'[OK]', bad:'[!!]', work:'[..]'};
@@ -393,20 +412,64 @@ document.addEventListener('click', e => {
   if (c && state.key) copy(c === 'pub' ? `n=${state.key.n}\ne=${state.key.e}` : `n=${state.key.n}\nd=${state.key.d}`,
                            c === 'pub' ? 'Kunci publik' : 'Kunci privat');
   if (u && state.key){
-    if (u === 'enc'){ $('#e-n').value = state.key.n; $('#e-e').value = state.key.e; $('#plain').focus(); }
+    if (u === 'enc'){ $('#e-n').value = state.key.n; $('#e-e').value = state.key.e; $('#drop').focus(); }
     else { $('#d-n').value = state.key.n; $('#d-d').value = state.key.d; }
     toast('ok', u === 'enc' ? 'Kunci publik dimuat ke form enkripsi' : 'Kunci privat dimuat ke form dekripsi');
   }
 });
 
-/* ── 02 encrypt ───────────────────────────────────────────────────── */
-for (const m of ['text','file']) $(`#tab-${m}`).onclick = () => {
-  state.mode = m;
-  $('#tab-text').setAttribute('aria-pressed', m === 'text');
-  $('#tab-file').setAttribute('aria-pressed', m === 'file');
-  $('#w-text').hidden = m !== 'text';
-  $('#w-file').hidden = m !== 'file';
+/* ── 02 encrypt (file only) ───────────────────────────────────────── */
+const MAX = 8 * 1048576;
+
+function showFile(f){
+  const drop = $('#drop');
+  if (!f){
+    drop.classList.remove('set');
+    $('#drop-idle').hidden = false;
+    $('#drop-has').hidden = true;
+    $('#drop-clear-row').hidden = true;
+    drop.setAttribute('aria-label', 'Pilih berkas untuk dienkripsi');
+    return;
+  }
+  drop.classList.add('set');
+  $('#drop-idle').hidden = true;
+  $('#drop-has').hidden = false;
+  $('#drop-clear-row').hidden = false;
+  $('#drop-name').textContent = f.name;
+  $('#drop-size').textContent = bytes(f.size) + (f.size > MAX ? ' — melebihi batas 8 MB' : '');
+  drop.setAttribute('aria-label', `Berkas terpilih: ${f.name}, ${bytes(f.size)}`);
+  if (!$('#label').value.trim()) $('#label').value = f.name.replace(/\.[^.]+$/, '').slice(0, 80);
+}
+
+$('#file').onchange = () => {
+  const f = $('#file').files[0];
+  showFile(f);
+  if (f) toast('ok', 'Berkas siap dienkripsi', `${f.name} · ${bytes(f.size)}`);
 };
+$('#drop-clear').onclick = () => { $('#file').value = ''; showFile(null); $('#file').click(); };
+// label[for] already opens the picker on click; keyboard needs an explicit handler
+$('#drop').addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); $('#file').click(); }
+});
+for (const ev of ['dragenter','dragover']) $('#drop').addEventListener(ev, e => {
+  e.preventDefault(); $('#drop').classList.add('over');
+});
+for (const ev of ['dragleave','dragend']) $('#drop').addEventListener(ev, () => $('#drop').classList.remove('over'));
+$('#drop').addEventListener('drop', e => {
+  e.preventDefault();
+  $('#drop').classList.remove('over');
+  const f = e.dataTransfer.files[0];
+  if (!f) return;
+  const dt = new DataTransfer();
+  dt.items.add(f);
+  $('#file').files = dt.files;          // keep the input as the single source of truth
+  showFile(f);
+  toast('ok', 'Berkas siap dienkripsi', `${f.name} · ${bytes(f.size)}`);
+});
+// stop a stray drop elsewhere on the page from navigating away from the app
+for (const ev of ['dragover','drop']) document.addEventListener(ev, e => {
+  if (!$('#drop').contains(e.target)) e.preventDefault();
+});
 
 const readFile = f => new Promise((res, rej) => {
   const fr = new FileReader();
@@ -421,17 +484,13 @@ $('#enc').onclick = async () => {
   const n = $('#e-n').value.trim(), e = $('#e-e').value.trim();
   if (!n || !e) return fail(slot, new Error('Isi modulus n dan eksponen e terlebih dulu (bangkitkan kunci di Key Bench).'));
 
-  let data, filename = null;
-  if (state.mode === 'file'){
-    const f = $('#file').files[0];
-    if (!f) return fail(slot, new Error('Pilih berkas untuk dienkripsi.'));
-    if (f.size > 8 * 1048576) return fail(slot, new Error('Berkas melebihi 8 MB.'));
-    try{ data = await readFile(f); }catch(err){ return fail(slot, err); }
-    filename = f.name;
-  }else{
-    data = $('#plain').value;
-    if (!data.trim()) return fail(slot, new Error('Tidak ada teks untuk dienkripsi.'));
-  }
+  const f = $('#file').files[0];
+  if (!f) return fail(slot, new Error('Pilih berkas untuk dienkripsi.'));
+  if (f.size > MAX) return fail(slot, new Error(`Berkas ${bytes(f.size)} melebihi batas 8 MB.`));
+  if (f.size === 0) return fail(slot, new Error('Berkas kosong — tidak ada yang dapat dienkripsi.'));
+  let data;
+  try{ data = await readFile(f); }catch(err){ return fail(slot, err); }
+  const filename = f.name;
 
   btn.disabled = true;
   const busy = toast('work', 'Menghitung C = M^e mod n…', null, true);
@@ -453,7 +512,8 @@ $('#enc').onclick = async () => {
     slot.replaceChildren(box);
 
     toast('ok', `"${r.label}" terenkripsi`, `${bytes(r.bytes)} → ${r.blocks} blok · ${r.ms} ms`);
-    $('#plain').value = ''; $('#file').value = ''; $('#label').value = '';
+    $('#file').value = ''; $('#label').value = '';
+    showFile(null);
     await refresh(r.id);
   }catch(err){ busy.remove(); fail(slot, err); }
   finally{ btn.disabled = false; }

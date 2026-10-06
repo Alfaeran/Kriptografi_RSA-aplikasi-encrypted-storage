@@ -9,6 +9,8 @@ membangkitkan kunci, mengenkripsi data, menyimpan ciphertext, dan mendekripsinya
 python server.py          # buka http://127.0.0.1:8765
 python main.py            # versi CLI (demo satu siklus)
 python e2e_test.py        # uji end-to-end di peramban (butuh playwright)
+python matrix_test.py     # 152 uji: semua situasi entri x setiap ukuran kunci
+python matrix_test.py 512 # hanya ukuran tertentu
 ```
 
 `e2e_test.py` memerlukan sekali persiapan:
@@ -26,7 +28,11 @@ pip install playwright && playwright install chromium
 | `server.py` | server HTTP pustaka-standar; menyajikan `ui.html` dan REST API |
 | `ui.html` | antarmuka tiga panel: Key Bench, Enkripsi & Simpan, Vault & Dekripsi |
 | `main.py` | demonstrasi CLI alur lengkap |
-| `e2e_test.py` | 30 pemeriksaan end-to-end lewat Chromium |
+| `e2e_test.py` | 42 pemeriksaan end-to-end lewat Chromium |
+| `matrix_test.py` | 152 uji API: 38 situasi entri x 4 ukuran kunci |
+
+Enkripsi hanya menerima **berkas** (unggah atau seret-lepas, maks 8 MB). Entri lama
+bertipe teks yang sudah ada di `vault.json` tetap dapat didekripsi.
 | `vault.json` | penyimpanan ciphertext (dibuat otomatis) |
 
 ## Catatan keamanan
