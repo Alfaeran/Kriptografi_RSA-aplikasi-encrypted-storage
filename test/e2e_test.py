@@ -15,7 +15,8 @@ import time
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VAULT = os.path.join(HERE, "vault.json")
+ROOT = os.path.dirname(HERE) if os.path.basename(HERE) == "test" else HERE
+VAULT = os.path.join(ROOT, "vault.json")
 BACKUP = VAULT + ".e2e-backup"
 
 # Fixtures: binary payload (all 256 byte values, so null bytes and high bytes
@@ -56,7 +57,7 @@ def main():
 
     port = free_port()
     env = {**os.environ, "PORT": str(port), "PYTHONIOENCODING": "utf-8"}
-    srv = subprocess.Popen([sys.executable, "server.py"], cwd=HERE, env=env,
+    srv = subprocess.Popen([sys.executable, "server.py"], cwd=ROOT, env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     base = f"http://127.0.0.1:{port}"
     try:
@@ -92,7 +93,7 @@ def main():
                   page.locator("#vault .empty, #vault .entry").count() >= 1)
             # [hidden] must actually hide: display:grid rules once beat the UA rule
             check("panel kunci tersembunyi sebelum keygen", page.locator("#kg-keys").is_hidden())
-            check("parameter tersembunyi sebelum keygen", page.locator("#kg-params").is_hidden())
+            check("parameter matematis lama sudah dihilangkan", page.locator("#kg-params").count() == 0)
 
             # --- plain-text input is gone; only the file drop zone remains ---
             check("textarea plainteks sudah dihapus", page.locator("#plain").count() == 0)
@@ -108,19 +109,11 @@ def main():
             page.wait_for_selector("#kg-keys:not([hidden])", timeout=60_000)
             check("keycard publik & privat tampil", page.locator(".keycard").count() == 2)
             check("glyph sidik kunci tergambar", page.locator("#gl-pub i").count() == 25)
-            check("enam parameter matematis tampil", page.locator("#kg-params .param").count() == 6)
             check("toast sukses keygen muncul", page.locator(".toast.ok").count() >= 1)
 
             n = page.input_value("#e-n")
             check("modulus terisi otomatis ke form enkripsi", n.isdigit() and len(n) > 100,
                   f"n={n[:24]} len={len(n)}")
-
-            # verify p*q == n and e*d == 1 mod phi, read straight off the screen
-            vals = {}
-            for row in page.locator("#kg-params .param").all():
-                vals[row.locator("em").inner_text()] = int(row.locator("dd").inner_text())
-            check("p x q == n (terlihat di UI)", vals["p"] * vals["q"] == vals["n"])
-            check("e x d == 1 mod phi(n)", vals["e"] * vals["d"] % vals["phi(n)"] == 1)
 
             # --- 02 encrypt: empty selection rejected before any upload -----
             page.click("#enc")

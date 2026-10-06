@@ -150,6 +150,15 @@ button.ghost{padding:6px 9px;font-size:10.5px;color:var(--fg-dim)}
 .formula b{color:var(--pub);font-weight:500}
 .trunc{color:var(--fg-faint)}
 
+/* ── file preview ───────────────────────────────────────────────────── */
+.preview-box{margin-top:12px;border:1px solid var(--rule);border-radius:2px;background:var(--ink);padding:10px;overflow:hidden}
+.preview-box img{display:block;max-width:100%;max-height:480px;margin:0 auto;border-radius:2px;object-fit:contain}
+.preview-box video{display:block;max-width:100%;max-height:480px;margin:0 auto;border-radius:2px}
+.preview-box audio{width:100%;margin-top:4px}
+.preview-box iframe{width:100%;height:450px;border:none;border-radius:2px;background:#fff}
+.preview-box pre{font-family:var(--mono);font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow:auto;margin:0}
+.preview-title{font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--fg-dim);text-transform:uppercase;margin-bottom:8px}
+
 /* ── vault ──────────────────────────────────────────────────────────── */
 .vault{display:grid;gap:7px;max-height:420px;overflow-y:auto;padding-right:2px}
 .entry{
@@ -238,8 +247,6 @@ button.ghost{padding:6px 9px;font-size:10.5px;color:var(--fg-dim)}
           </div>
         </div>
       </div>
-
-      <dl class="params" id="kg-params" hidden></dl>
     </div>
   </section>
 
@@ -337,6 +344,97 @@ function fail(slot, e){
 const bytes = b => b < 1024 ? b + ' B' : b < 1048576 ? (b/1024).toFixed(1) + ' KB' : (b/1048576).toFixed(2) + ' MB';
 const clip = (s, n = 36) => s.length <= n ? s : s.slice(0, n) + '…';
 
+const MIME_TYPES = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+  webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon',
+  txt: 'text/plain;charset=utf-8', md: 'text/markdown;charset=utf-8',
+  json: 'application/json', csv: 'text/csv;charset=utf-8',
+  xml: 'application/xml', html: 'text/html;charset=utf-8',
+  css: 'text/css;charset=utf-8', js: 'application/javascript',
+  py: 'text/plain;charset=utf-8', log: 'text/plain;charset=utf-8',
+  pdf: 'application/pdf',
+  mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4',
+  mp4: 'video/mp4', webm: 'video/webm'
+};
+
+function getMime(filename){
+  const ext = (filename || '').split('.').pop().toLowerCase();
+  return MIME_TYPES[ext] || 'application/octet-stream';
+}
+
+function b64ToBlobUrl(b64, mime){
+  try{
+    const bin = atob(b64);
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    return URL.createObjectURL(new Blob([u8], {type: mime}));
+  }catch(e){
+    return 'data:' + mime + ';base64,' + b64;
+  }
+}
+
+function b64ToUtf8(b64){
+  try{
+    const bin = atob(b64);
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    return new TextDecoder('utf-8', {fatal: true}).decode(u8);
+  }catch(e){
+    return null;
+  }
+}
+
+function renderPreview(r, mime, blobUrl){
+  const ext = (r.filename || '').split('.').pop().toLowerCase();
+  const box = document.createElement('div');
+  box.className = 'preview-box';
+
+  const title = document.createElement('div');
+  title.className = 'preview-title';
+  title.textContent = `Pratinjau Berkas (${ext ? ext.toUpperCase() : 'BERKAS'}):`;
+  box.append(title);
+
+  const images = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'];
+  const audios = ['mp3', 'wav', 'ogg', 'm4a'];
+  const videos = ['mp4', 'webm'];
+
+  if (images.includes(ext)){
+    const img = document.createElement('img');
+    img.src = blobUrl;
+    img.alt = r.filename || 'Pratinjau';
+    box.append(img);
+  } else if (ext === 'pdf'){
+    const frame = document.createElement('iframe');
+    frame.src = blobUrl;
+    box.append(frame);
+  } else if (audios.includes(ext)){
+    const audio = document.createElement('audio');
+    audio.controls = true;
+    audio.src = blobUrl;
+    box.append(audio);
+  } else if (videos.includes(ext)){
+    const video = document.createElement('video');
+    video.controls = true;
+    video.src = blobUrl;
+    box.append(video);
+  } else {
+    const text = b64ToUtf8(r.data);
+    if (text !== null){
+      const pre = document.createElement('pre');
+      pre.textContent = text;
+      box.append(pre);
+    } else {
+      const p = document.createElement('p');
+      p.style.fontFamily = 'var(--mono)';
+      p.style.fontSize = '11px';
+      p.style.color = 'var(--fg-faint)';
+      p.textContent = 'Format biner ini tidak mendukung pratinjau langsung di peramban. Silakan gunakan tombol unduh di atas.';
+      box.append(p);
+    }
+  }
+  return box;
+}
+
 function drawGlyph(el, bits){
   el.replaceChildren(...bits.map(on => {
     const i = document.createElement('i');
@@ -357,34 +455,11 @@ $('#kg').onclick = async () => {
 
     $('#kg-note').textContent = `${k.bits} bit · ${k.ms} ms · blok ${k.block_bytes} B`;
     $('#kg-keys').hidden = false;
-    $('#kg-params').hidden = false;
     $('#kg-clear').hidden = false;
     drawGlyph($('#gl-pub'), k.glyph);
     drawGlyph($('#gl-priv'), k.glyph);
     $('#v-pub').textContent  = `n = ${k.n}\ne = ${k.e}`;
     $('#v-priv').textContent = `n = ${k.n}\nd = ${k.d}`;
-
-    $('#kg-params').replaceChildren(...[
-      ['p',    'prima pertama',   k.p],
-      ['q',    'prima kedua',     k.q],
-      ['n',    'p × q (modulus)', k.n],
-      ['phi(n)','(p−1)(q−1)',     k.phi],
-      ['e',    'eksponen publik', k.e],
-      ['d',    'e⁻¹ mod phi(n)',  k.d],
-    ].map(([sym, desc, val]) => {
-      const row = document.createElement('div');
-      row.className = 'param';
-      const dt = document.createElement('dt');
-      const em = document.createElement('em'); em.textContent = sym;
-      const sp = document.createElement('span'); sp.className = 'trunc'; sp.textContent = ' ' + desc;
-      dt.append(em, sp);
-      const dd = document.createElement('dd'); dd.textContent = val;
-      const b = document.createElement('button');
-      b.className = 'ghost'; b.textContent = 'Salin';
-      b.onclick = () => copy(val, sym);
-      row.append(dt, dd, b);
-      return row;
-    }));
 
     $('#e-n').value = k.n; $('#d-n').value = k.n;
     $('#e-e').value = k.e;
@@ -396,7 +471,6 @@ $('#kg').onclick = async () => {
 $('#kg-clear').onclick = () => {
   state.key = null;
   $('#kg-keys').hidden = true;
-  $('#kg-params').hidden = true;
   $('#kg-clear').hidden = true;
   $('#kg-note').textContent = 'belum ada kunci aktif';
   $('#d-d').value = '';
@@ -584,13 +658,24 @@ $('#dec').onclick = async () => {
     h.textContent = `Dekripsi berhasil · ${bytes(r.bytes)} · ${r.ms} ms`;
     box.append(h);
     if (r.kind === 'file'){
+      const mime = getMime(r.filename);
+      const blobUrl = b64ToBlobUrl(r.data, mime);
+
+      const dlRow = document.createElement('div');
+      dlRow.style.margin = '10px 0 0';
+
       const a = document.createElement('a');
-      a.href = 'data:application/octet-stream;base64,' + r.data;
+      a.href = blobUrl;
       a.download = r.filename || 'hasil.bin';
       const btn2 = document.createElement('button');
-      btn2.className = 'warm'; btn2.textContent = `Unduh ${r.filename}`;
+      btn2.className = 'warm';
+      btn2.textContent = `Unduh ${r.filename}`;
       a.append(btn2);
-      box.append(a);
+      dlRow.append(a);
+
+      const preview = renderPreview(r, mime, blobUrl);
+
+      box.append(dlRow, preview);
     }else{
       const pre = document.createElement('pre');
       pre.textContent = r.text;

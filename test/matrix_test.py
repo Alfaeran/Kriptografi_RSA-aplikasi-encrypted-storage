@@ -23,10 +23,14 @@ import time
 import urllib.error
 import urllib.request
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE) if os.path.basename(HERE) == "test" else HERE
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
 import rsa
 import storage
 
-HERE = os.path.dirname(os.path.abspath(__file__))
 ALL_SIZES = (256, 512, 1024, 2048)
 
 rows = []            # (size, scenario, ok, detail)
@@ -222,7 +226,7 @@ def main():
 
     env = {**os.environ, "PORT": str(port), "VAULT_FILE": VAULT_PATH,
            "PYTHONIOENCODING": "utf-8"}
-    srv = subprocess.Popen([sys.executable, "server.py"], cwd=HERE, env=env,
+    srv = subprocess.Popen([sys.executable, "server.py"], cwd=ROOT, env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:
         for _ in range(80):
