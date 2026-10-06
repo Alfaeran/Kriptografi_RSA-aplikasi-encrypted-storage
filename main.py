@@ -1,5 +1,11 @@
+import sys
+
 import rsa
 import storage
+
+# Windows console defaults to cp1252, which cannot encode the checkmark below.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 def main():
     print("=" * 60)

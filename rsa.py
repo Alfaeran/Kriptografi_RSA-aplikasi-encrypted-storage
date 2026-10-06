@@ -50,7 +50,8 @@ def generate_prime(nbits):
         if is_prime(candidate):
             return candidate
 
-def generate_rsa_key(nbits):
+def generate_rsa_key_parts(nbits):
+    """Like generate_rsa_key, but also exposes p, q and phi(n) for display."""
     if nbits < 4:
         raise ValueError("nbits must be >= 4")
 
@@ -66,7 +67,11 @@ def generate_rsa_key(nbits):
     e = 65537
     d = pow(e, -1, phi_n)
 
-    return (n, e), (n, d)
+    return {"p": p, "q": q, "n": n, "phi": phi_n, "e": e, "d": d}
+
+def generate_rsa_key(nbits):
+    k = generate_rsa_key_parts(nbits)
+    return (k["n"], k["e"]), (k["n"], k["d"])
 
 def encrypt(pubkey, plaintext):
     n, e = pubkey

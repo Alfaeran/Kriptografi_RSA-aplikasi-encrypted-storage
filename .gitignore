@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 *.enc
+vault.json
+vault.json.*
+ui-screenshot.png
+*.stackdump

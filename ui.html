@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RSA Vault — Encrypted Storage</title>
+<style>
+/* ── tokens ─────────────────────────────────────────────────────────── */
+:root{
+  --ink:#0b0d10; --panel:#12151a; --panel-2:#171b21; --rule:#242a33;
+  --fg:#e6e9ee; --fg-dim:#9aa3b0; --fg-faint:#636c79;
+  --pub:#3fd0d6;        /* public key identity  */
+  --priv:#f3a63c;       /* private key identity */
+  --ok:#5ad67d; --bad:#ff5f5f;
+  --mono:ui-monospace,"Cascadia Code","SF Mono",Consolas,"Liberation Mono",monospace;
+  --sans:Inter,-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+  --r:3px;
+}
+*{box-sizing:border-box;margin:0}
+/* our display:grid rules outrank the UA [hidden] rule — restore it */
+[hidden]{display:none!important}
+html,body{height:100%}
+body{
+  background:var(--ink); color:var(--fg); font:14px/1.5 var(--sans);
+  -webkit-font-smoothing:antialiased;
+  /* faint engineering grid — texture, not decoration */
+  background-image:linear-gradient(var(--panel) 1px,transparent 1px),
+                   linear-gradient(90deg,var(--panel) 1px,transparent 1px);
+  background-size:44px 44px;
+}
+::selection{background:var(--pub);color:#04161a}
+
+/* ── chrome ─────────────────────────────────────────────────────────── */
+.bar{
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:10px 18px;border-bottom:1px solid var(--rule);
+  background:rgba(11,13,16,.92);backdrop-filter:blur(8px);
+  position:sticky;top:0;z-index:40;
+}
+.mark{display:flex;align-items:baseline;gap:8px;font-family:var(--mono)}
+.mark b{font-size:13px;letter-spacing:.14em;font-weight:600}
+.mark span{font-size:10px;color:var(--fg-faint);letter-spacing:.12em}
+.bar .spacer{flex:1}
+.wire{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
+  color:var(--fg-faint);border:1px solid var(--rule);border-radius:999px;
+  padding:3px 9px;min-width:0;max-width:100%;
+}
+@media(max-width:560px){.bar{padding:10px 14px}.wire{font-size:9.5px;letter-spacing:.06em}}
+.wire b{color:var(--ok);font-weight:500}
+
+/* ── layout: a workbench, not a landing page ────────────────────────── */
+main{padding:18px;display:grid;gap:14px;max-width:1500px;margin:0 auto}
+.split{display:grid;gap:14px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+@media(max-width:1080px){.split{grid-template-columns:minmax(0,1fr)}}
+
+section{
+  background:var(--panel);border:1px solid var(--rule);border-radius:var(--r);
+  display:flex;flex-direction:column;min-width:0;
+}
+.head{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:11px 14px;border-bottom:1px solid var(--rule);
+}
+.step{
+  font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.1em;
+  width:20px;height:20px;flex:none;display:grid;place-items:center;
+  border:1px solid var(--rule);border-radius:2px;color:var(--fg-faint);
+}
+.head h2{font-size:12px;font-weight:600;letter-spacing:.11em;text-transform:uppercase}
+.head .note{font-family:var(--mono);font-size:10.5px;color:var(--fg-faint);margin-left:auto}
+.body{padding:14px;display:grid;gap:12px;min-width:0}
+
+/* ── controls ───────────────────────────────────────────────────────── */
+label.f{display:grid;gap:5px;min-width:0}
+label.f>span{font-family:var(--mono);font-size:10px;letter-spacing:.11em;color:var(--fg-dim);text-transform:uppercase}
+input,textarea,select{
+  width:100%;background:var(--ink);color:var(--fg);border:1px solid var(--rule);
+  border-radius:2px;padding:8px 10px;font:12px/1.5 var(--mono);
+}
+textarea{resize:vertical;min-height:84px}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--pub);box-shadow:0 0 0 2px rgba(63,208,214,.14)}
+input[data-key=priv]:focus{border-color:var(--priv);box-shadow:0 0 0 2px rgba(243,166,60,.14)}
+
+button{
+  font:600 11.5px/1 var(--sans);letter-spacing:.06em;color:var(--fg);
+  background:var(--panel-2);border:1px solid var(--rule);border-radius:2px;
+  padding:9px 14px;cursor:pointer;transition:background .12s,border-color .12s,color .12s;
+}
+button:hover:not(:disabled){background:#1e242c;border-color:#36404d}
+button:focus-visible{outline:2px solid var(--pub);outline-offset:1px}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.go{background:var(--pub);border-color:var(--pub);color:#04161a}
+button.go:hover:not(:disabled){background:#5ae0e6;border-color:#5ae0e6}
+button.warm{background:var(--priv);border-color:var(--priv);color:#1b1004}
+button.warm:hover:not(:disabled){background:#ffb658;border-color:#ffb658}
+button.ghost{padding:6px 9px;font-size:10.5px;color:var(--fg-dim)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+.seg{display:flex;border:1px solid var(--rule);border-radius:2px;overflow:hidden;width:fit-content}
+.seg button{border:0;border-radius:0;background:transparent;font-family:var(--mono);font-size:11px;padding:7px 12px;color:var(--fg-dim)}
+.seg button[aria-pressed=true]{background:var(--panel-2);color:var(--fg);box-shadow:inset 0 -2px 0 var(--pub)}
+
+/* ── key identity: glyph + value, the signature element ─────────────── */
+.keycard{
+  display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:start;
+  padding:11px;border:1px solid var(--rule);border-radius:2px;background:var(--panel-2);
+}
+.glyph{display:grid;grid-template-columns:repeat(5,8px);gap:2px;padding:5px;border:1px solid var(--rule);border-radius:2px}
+.glyph i{width:8px;height:8px;background:#1d242c;border-radius:1px;transition:background .3s}
+.glyph.pub i.on{background:var(--pub);box-shadow:0 0 5px rgba(63,208,214,.5)}
+.glyph.priv i.on{background:var(--priv);box-shadow:0 0 5px rgba(243,166,60,.5)}
+.glyph.sm{grid-template-columns:repeat(5,4px);gap:1px;padding:3px}
+.glyph.sm i{width:4px;height:4px}
+.keycard .kind{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase}
+.keycard.pub .kind{color:var(--pub)} .keycard.priv .kind{color:var(--priv)}
+.keycard .val{
+  font-family:var(--mono);font-size:11px;color:var(--fg-dim);
+  word-break:break-all;max-height:3.9em;overflow:auto;margin-top:4px;
+  white-space:pre-wrap;
+}
+
+/* ── parameter tape: the math, visible ──────────────────────────────── */
+.params{display:grid;gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:2px;overflow:hidden}
+.param{display:grid;grid-template-columns:76px minmax(0,1fr) auto;gap:10px;align-items:center;background:var(--panel-2);padding:7px 10px}
+.param dt{font-family:var(--mono);font-size:11px;color:var(--fg-dim)}
+.param dt em{color:var(--fg);font-style:normal}
+.param dd{font-family:var(--mono);font-size:11px;word-break:break-all;max-height:3.2em;overflow:auto}
+.formula{
+  font-family:var(--mono);font-size:11.5px;padding:9px 11px;border:1px dashed var(--rule);
+  border-radius:2px;color:var(--fg-dim);overflow-x:auto;white-space:nowrap;
+}
+.formula b{color:var(--pub);font-weight:500}
+.trunc{color:var(--fg-faint)}
+
+/* ── vault ──────────────────────────────────────────────────────────── */
+.vault{display:grid;gap:7px;max-height:420px;overflow-y:auto;padding-right:2px}
+.entry{
+  display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:11px;align-items:center;
+  padding:9px 11px;background:var(--panel-2);border:1px solid var(--rule);
+  border-left:2px solid var(--rule);border-radius:2px;cursor:pointer;text-align:left;
+  font:inherit;color:inherit;width:100%;transition:border-color .12s,background .12s;
+}
+.entry:hover{background:#1b2129;border-color:#36404d}
+.entry[aria-current=true]{border-left-color:var(--pub);background:#141d20}
+.entry .lbl{font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.entry .meta{font-family:var(--mono);font-size:10px;color:var(--fg-faint);margin-top:2px;word-break:break-all}
+.tag{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;padding:2px 5px;border:1px solid var(--rule);border-radius:2px;color:var(--fg-dim);text-transform:uppercase}
+.empty{font-family:var(--mono);font-size:11.5px;color:var(--fg-faint);padding:26px 12px;text-align:center;border:1px dashed var(--rule);border-radius:2px}
+
+/* ── result ─────────────────────────────────────────────────────────── */
+.out{border:1px solid var(--ok);border-radius:2px;background:rgba(90,214,125,.05);padding:11px}
+.out h3{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--ok);text-transform:uppercase;margin-bottom:7px}
+.out pre{font-family:var(--mono);font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto}
+.err{border:1px solid var(--bad);border-radius:2px;background:rgba(255,95,95,.06);padding:10px 11px;font-size:12.5px;color:#ffc2c2}
+
+/* ── toasts ─────────────────────────────────────────────────────────── */
+#toasts{position:fixed;right:16px;bottom:16px;z-index:90;display:grid;gap:8px;width:min(330px,calc(100vw - 32px))}
+.toast{
+  display:grid;grid-template-columns:auto minmax(0,1fr);gap:9px;align-items:start;
+  background:var(--panel);border:1px solid var(--rule);border-left:2px solid var(--fg-faint);
+  border-radius:2px;padding:10px 12px;box-shadow:0 10px 26px rgba(0,0,0,.5);
+  animation:slide .2s ease-out;
+}
+.toast.ok{border-left-color:var(--ok)} .toast.bad{border-left-color:var(--bad)} .toast.work{border-left-color:var(--pub)}
+.toast .ic{font-family:var(--mono);font-size:11px;color:var(--fg-faint)}
+.toast.ok .ic{color:var(--ok)} .toast.bad .ic{color:var(--bad)} .toast.work .ic{color:var(--pub)}
+.toast p{font-size:12.5px} .toast small{font-family:var(--mono);font-size:10px;color:var(--fg-faint);display:block;margin-top:2px}
+@keyframes slide{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="mark"><b>RSA&nbsp;VAULT</b><span>ENCRYPTED STORAGE</span></div>
+  <div class="spacer"></div>
+  <div class="wire" id="wire">vault <b>—</b> entri · kunci privat <b>tidak pernah</b> disimpan</div>
+</header>
+
+<main>
+  <!-- 1 · KEY BENCH -->
+  <section>
+    <div class="head">
+      <div class="step">01</div><h2>Key Bench</h2>
+      <div class="note" id="kg-note">belum ada kunci aktif</div>
+    </div>
+    <div class="body">
+      <div class="row">
+        <label class="f" style="flex:0 0 150px">
+          <span>Panjang kunci</span>
+          <select id="bits"></select>
+        </label>
+        <button class="go" id="kg">Bangkitkan kunci</button>
+        <button class="ghost" id="kg-clear" hidden>Lupakan kunci</button>
+      </div>
+
+      <div class="split" id="kg-keys" hidden>
+        <div class="keycard pub">
+          <div class="glyph pub" id="gl-pub" aria-hidden="true"></div>
+          <div>
+            <div class="kind">Kunci publik · (n, e)</div>
+            <div class="val" id="v-pub"></div>
+            <div class="row" style="margin-top:7px">
+              <button class="ghost" data-copy="pub">Salin</button>
+              <button class="ghost" data-use="enc">Pakai untuk enkripsi →</button>
+            </div>
+          </div>
+        </div>
+        <div class="keycard priv">
+          <div class="glyph priv" id="gl-priv" aria-hidden="true"></div>
+          <div>
+            <div class="kind">Kunci privat · (n, d) — simpan sendiri</div>
+            <div class="val" id="v-priv"></div>
+            <div class="row" style="margin-top:7px">
+              <button class="ghost" data-copy="priv">Salin</button>
+              <button class="ghost" data-use="dec">Pakai untuk dekripsi →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <dl class="params" id="kg-params" hidden></dl>
+    </div>
+  </section>
+
+  <div class="split">
+    <!-- 2 · ENCRYPT -->
+    <section>
+      <div class="head"><div class="step">02</div><h2>Enkripsi &amp; Simpan</h2></div>
+      <div class="body">
+        <label class="f"><span>Label entri</span>
+          <input id="label" placeholder="mis. catatan ujian" maxlength="80"></label>
+
+        <div class="seg" role="group" aria-label="Jenis masukan">
+          <button id="tab-text" aria-pressed="true">Teks</button>
+          <button id="tab-file" aria-pressed="false">Berkas</button>
+        </div>
+
+        <label class="f" id="w-text"><span>Plainteks</span>
+          <textarea id="plain" placeholder="Tulis data sensitif di sini…"></textarea></label>
+        <label class="f" id="w-file" hidden><span>Berkas (maks 8 MB)</span>
+          <input type="file" id="file"></label>
+
+        <div class="split" style="gap:10px">
+          <label class="f"><span>Modulus n</span><input id="e-n" inputmode="numeric" placeholder="paste dari Key Bench"></label>
+          <label class="f"><span>Eksponen publik e</span><input id="e-e" inputmode="numeric" value="65537"></label>
+        </div>
+
+        <div class="row"><button class="go" id="enc">Enkripsi &amp; simpan ke vault</button></div>
+        <div id="enc-out"></div>
+      </div>
+    </section>
+
+    <!-- 3 · VAULT + DECRYPT -->
+    <section>
+      <div class="head">
+        <div class="step">03</div><h2>Vault &amp; Dekripsi</h2>
+        <div class="note" id="v-count"></div>
+      </div>
+      <div class="body">
+        <div class="vault" id="vault"></div>
+
+        <div class="split" style="gap:10px">
+          <label class="f"><span>Modulus n</span><input id="d-n" inputmode="numeric" placeholder="paste dari Key Bench"></label>
+          <label class="f"><span>Eksponen privat d</span><input id="d-d" data-key="priv" inputmode="numeric" placeholder="rahasia — tidak disimpan"></label>
+        </div>
+
+        <div class="row">
+          <button class="warm" id="dec" disabled>Dekripsi entri terpilih</button>
+          <button class="ghost" id="del" disabled>Hapus entri</button>
+        </div>
+        <div id="dec-out"></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div id="toasts" role="status" aria-live="polite"></div>
+<div class="sr" id="sr" role="alert" aria-live="assertive"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const state = { key:null, mode:'text', selected:null, entries:[] };
+
+/* ── toasts ───────────────────────────────────────────────────────── */
+const ICON = {ok:'[OK]', bad:'[!!]', work:'[..]'};
+function toast(kind, msg, sub, hold){
+  const t = document.createElement('div');
+  t.className = 'toast ' + kind;
+  const ic = document.createElement('span'); ic.className = 'ic'; ic.textContent = ICON[kind];
+  const wrap = document.createElement('div');
+  const p = document.createElement('p'); p.textContent = msg; wrap.append(p);
+  if (sub){ const s = document.createElement('small'); s.textContent = sub; wrap.append(s); }
+  t.append(ic, wrap);
+  const box = $('#toasts');
+  box.append(t);
+  // keep the stack from covering the vault panel on short screens
+  while (box.children.length > 4) box.firstElementChild.remove();
+  if (kind === 'bad') $('#sr').textContent = msg;
+  if (!hold) setTimeout(() => t.remove(), kind === 'bad' ? 7000 : 3600);
+  return t;
+}
+
+async function api(path, body){
+  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const j = await r.json().catch(() => ({error:'Respons server tidak dapat dibaca.'}));
+  if (!r.ok) throw new Error(j.error || 'Permintaan gagal.');
+  return j;
+}
+function fail(slot, e){
+  const box = document.createElement('div');
+  box.className = 'err'; box.textContent = e.message;
+  slot.replaceChildren(box);
+  toast('bad', e.message);
+}
+const bytes = b => b < 1024 ? b + ' B' : b < 1048576 ? (b/1024).toFixed(1) + ' KB' : (b/1048576).toFixed(2) + ' MB';
+const clip = (s, n = 36) => s.length <= n ? s : s.slice(0, n) + '…';
+
+function drawGlyph(el, bits){
+  el.replaceChildren(...bits.map(on => {
+    const i = document.createElement('i');
+    if (on) i.className = 'on';
+    return i;
+  }));
+}
+
+/* ── 01 keygen ────────────────────────────────────────────────────── */
+$('#kg').onclick = async () => {
+  const btn = $('#kg'), bits = +$('#bits').value;
+  btn.disabled = true;
+  const busy = toast('work', `Membangkitkan kunci ${bits} bit…`, 'mencari dua bilangan prima', true);
+  try{
+    const k = await api('/api/keygen', {bits});
+    state.key = k;
+    busy.remove();
+
+    $('#kg-note').textContent = `${k.bits} bit · ${k.ms} ms · blok ${k.block_bytes} B`;
+    $('#kg-keys').hidden = false;
+    $('#kg-params').hidden = false;
+    $('#kg-clear').hidden = false;
+    drawGlyph($('#gl-pub'), k.glyph);
+    drawGlyph($('#gl-priv'), k.glyph);
+    $('#v-pub').textContent  = `n = ${k.n}\ne = ${k.e}`;
+    $('#v-priv').textContent = `n = ${k.n}\nd = ${k.d}`;
+
+    $('#kg-params').replaceChildren(...[
+      ['p',    'prima pertama',   k.p],
+      ['q',    'prima kedua',     k.q],
+      ['n',    'p × q (modulus)', k.n],
+      ['phi(n)','(p−1)(q−1)',     k.phi],
+      ['e',    'eksponen publik', k.e],
+      ['d',    'e⁻¹ mod phi(n)',  k.d],
+    ].map(([sym, desc, val]) => {
+      const row = document.createElement('div');
+      row.className = 'param';
+      const dt = document.createElement('dt');
+      const em = document.createElement('em'); em.textContent = sym;
+      const sp = document.createElement('span'); sp.className = 'trunc'; sp.textContent = ' ' + desc;
+      dt.append(em, sp);
+      const dd = document.createElement('dd'); dd.textContent = val;
+      const b = document.createElement('button');
+      b.className = 'ghost'; b.textContent = 'Salin';
+      b.onclick = () => copy(val, sym);
+      row.append(dt, dd, b);
+      return row;
+    }));
+
+    $('#e-n').value = k.n; $('#d-n').value = k.n;
+    $('#e-e').value = k.e;
+    toast('ok', 'Pasangan kunci siap', `${k.bits} bit dalam ${k.ms} ms`);
+  }catch(e){ busy.remove(); toast('bad', e.message); }
+  finally{ btn.disabled = false; }
+};
+
+$('#kg-clear').onclick = () => {
+  state.key = null;
+  $('#kg-keys').hidden = true;
+  $('#kg-params').hidden = true;
+  $('#kg-clear').hidden = true;
+  $('#kg-note').textContent = 'belum ada kunci aktif';
+  $('#d-d').value = '';
+  toast('ok', 'Kunci dilupakan dari layar', 'ciphertext di vault tidak terpengaruh');
+};
+
+async function copy(text, what){
+  try{ await navigator.clipboard.writeText(text); toast('ok', `${what} disalin`); }
+  catch{ toast('bad', 'Peramban menolak akses papan klip — salin manual.'); }
+}
+document.addEventListener('click', e => {
+  const c = e.target.dataset?.copy, u = e.target.dataset?.use;
+  if (c && state.key) copy(c === 'pub' ? `n=${state.key.n}\ne=${state.key.e}` : `n=${state.key.n}\nd=${state.key.d}`,
+                           c === 'pub' ? 'Kunci publik' : 'Kunci privat');
+  if (u && state.key){
+    if (u === 'enc'){ $('#e-n').value = state.key.n; $('#e-e').value = state.key.e; $('#plain').focus(); }
+    else { $('#d-n').value = state.key.n; $('#d-d').value = state.key.d; }
+    toast('ok', u === 'enc' ? 'Kunci publik dimuat ke form enkripsi' : 'Kunci privat dimuat ke form dekripsi');
+  }
+});
+
+/* ── 02 encrypt ───────────────────────────────────────────────────── */
+for (const m of ['text','file']) $(`#tab-${m}`).onclick = () => {
+  state.mode = m;
+  $('#tab-text').setAttribute('aria-pressed', m === 'text');
+  $('#tab-file').setAttribute('aria-pressed', m === 'file');
+  $('#w-text').hidden = m !== 'text';
+  $('#w-file').hidden = m !== 'file';
+};
+
+const readFile = f => new Promise((res, rej) => {
+  const fr = new FileReader();
+  fr.onload = () => res(fr.result.split(',')[1]);
+  fr.onerror = () => rej(new Error('Berkas gagal dibaca.'));
+  fr.readAsDataURL(f);
+});
+
+$('#enc').onclick = async () => {
+  const slot = $('#enc-out'), btn = $('#enc');
+  slot.replaceChildren();
+  const n = $('#e-n').value.trim(), e = $('#e-e').value.trim();
+  if (!n || !e) return fail(slot, new Error('Isi modulus n dan eksponen e terlebih dulu (bangkitkan kunci di Key Bench).'));
+
+  let data, filename = null;
+  if (state.mode === 'file'){
+    const f = $('#file').files[0];
+    if (!f) return fail(slot, new Error('Pilih berkas untuk dienkripsi.'));
+    if (f.size > 8 * 1048576) return fail(slot, new Error('Berkas melebihi 8 MB.'));
+    try{ data = await readFile(f); }catch(err){ return fail(slot, err); }
+    filename = f.name;
+  }else{
+    data = $('#plain').value;
+    if (!data.trim()) return fail(slot, new Error('Tidak ada teks untuk dienkripsi.'));
+  }
+
+  btn.disabled = true;
+  const busy = toast('work', 'Menghitung C = M^e mod n…', null, true);
+  try{
+    const r = await api('/api/encrypt', {n, e, data, filename, label:$('#label').value});
+    busy.remove();
+
+    const box = document.createElement('div');
+    box.className = 'out';
+    const h = document.createElement('h3');
+    h.textContent = `Tersimpan di vault · ${r.blocks} blok · ${r.ms} ms`;
+    const f = document.createElement('div');
+    f.className = 'formula';
+    f.textContent = `C = ${clip(r.tape.m, 22)}^${r.tape.e} mod ${clip(r.tape.n, 22)} = ${clip(r.tape.c, 28)}  (blok 1)`;
+    const pre = document.createElement('pre');
+    pre.style.marginTop = '9px';
+    pre.textContent = r.preview + (r.preview.length >= 160 ? '…' : '');
+    box.append(h, f, pre);
+    slot.replaceChildren(box);
+
+    toast('ok', `"${r.label}" terenkripsi`, `${bytes(r.bytes)} → ${r.blocks} blok · ${r.ms} ms`);
+    $('#plain').value = ''; $('#file').value = ''; $('#label').value = '';
+    await refresh(r.id);
+  }catch(err){ busy.remove(); fail(slot, err); }
+  finally{ btn.disabled = false; }
+};
+
+/* ── 03 vault + decrypt ───────────────────────────────────────────── */
+async function refresh(select){
+  const r = await fetch('/api/vault').then(x => x.json());
+  state.entries = r.entries;
+  if (!$('#bits').options.length){
+    $('#bits').replaceChildren(...r.sizes.map(b => {
+      const o = document.createElement('option');
+      o.value = b; o.textContent = `${b} bit`; o.selected = b === 512;
+      return o;
+    }));
+  }
+  if (select) state.selected = select;
+  if (!state.entries.some(x => x.id === state.selected)) state.selected = null;
+
+  $('#v-count').textContent = `${state.entries.length} entri`;
+  $('#wire').textContent = `vault ${state.entries.length} entri · kunci privat tidak pernah disimpan`;
+  $('#dec').disabled = !state.selected;
+  $('#del').disabled = !state.selected;
+
+  const box = $('#vault');
+  if (!state.entries.length){
+    const e = document.createElement('div');
+    e.className = 'empty';
+    e.textContent = 'Vault kosong — enkripsi sesuatu di panel 02.';
+    box.replaceChildren(e);
+    return;
+  }
+  box.replaceChildren(...state.entries.map(en => {
+    const b = document.createElement('button');
+    b.className = 'entry';
+    b.setAttribute('aria-current', en.id === state.selected);
+    const g = document.createElement('div');
+    g.className = 'glyph sm pub'; g.setAttribute('aria-hidden','true');
+    drawGlyph(g, en.glyph);
+    const mid = document.createElement('div');
+    const lbl = document.createElement('div'); lbl.className = 'lbl';
+    lbl.textContent = en.filename ? `${en.label} · ${en.filename}` : en.label;
+    const meta = document.createElement('div'); meta.className = 'meta';
+    meta.textContent = `${en.created} · ${bytes(en.bytes)} · ${en.blocks} blok · ${en.bits} bit · n…${en.n_tail}`;
+    mid.append(lbl, meta);
+    const tag = document.createElement('span');
+    tag.className = 'tag'; tag.textContent = en.kind;
+    b.append(g, mid, tag);
+    b.onclick = () => { state.selected = en.id; $('#dec-out').replaceChildren(); refresh(); };
+    return b;
+  }));
+}
+
+$('#dec').onclick = async () => {
+  const slot = $('#dec-out'), btn = $('#dec');
+  slot.replaceChildren();
+  const n = $('#d-n').value.trim(), d = $('#d-d').value.trim();
+  if (!n || !d) return fail(slot, new Error('Masukkan modulus n dan eksponen privat d.'));
+
+  btn.disabled = true;
+  const busy = toast('work', 'Menghitung M = C^d mod n…', null, true);
+  try{
+    const r = await api('/api/decrypt', {n, d, id:state.selected});
+    busy.remove();
+    const box = document.createElement('div');
+    box.className = 'out';
+    const h = document.createElement('h3');
+    h.textContent = `Dekripsi berhasil · ${bytes(r.bytes)} · ${r.ms} ms`;
+    box.append(h);
+    if (r.kind === 'file'){
+      const a = document.createElement('a');
+      a.href = 'data:application/octet-stream;base64,' + r.data;
+      a.download = r.filename || 'hasil.bin';
+      const btn2 = document.createElement('button');
+      btn2.className = 'warm'; btn2.textContent = `Unduh ${r.filename}`;
+      a.append(btn2);
+      box.append(a);
+    }else{
+      const pre = document.createElement('pre');
+      pre.textContent = r.text;
+      box.append(pre);
+    }
+    slot.replaceChildren(box);
+    toast('ok', 'Plainteks dipulihkan', `${r.ms} ms`);
+  }catch(e){ busy.remove(); fail(slot, e); }
+  finally{ btn.disabled = false; }
+};
+
+$('#del').onclick = async () => {
+  const en = state.entries.find(x => x.id === state.selected);
+  if (!en) return;
+  if (!confirm(`Hapus "${en.label}" dari vault secara permanen?\n\nCiphertext ini tidak dapat dipulihkan setelah dihapus.`)) return;
+  try{
+    await api('/api/delete', {id:state.selected});
+    $('#dec-out').replaceChildren();
+    toast('ok', `"${en.label}" dihapus dari vault`);
+    await refresh();
+  }catch(e){ toast('bad', e.message); }
+};
+
+refresh();
+</script>
+</body>
+</html>
